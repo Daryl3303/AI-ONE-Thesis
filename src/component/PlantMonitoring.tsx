@@ -10,10 +10,40 @@ import {
   onSnapshot,
   setDoc,
   updateDoc,
+  getDoc,
 } from "firebase/firestore";
 import { CheckCircle, Eye } from "lucide-react";
 
 const PlantMonitoring = () => {
+  const getCustomFormattedDateTime = () => {
+    const currentDate = new Date();
+
+    // Custom format (example: "2025-01-20 12:34:56")
+    const customFormattedDateTime =
+      currentDate
+        .toLocaleString("en-US", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        })
+        .replace(",", "")
+        .replace("/", "-")
+        .replace("/", "-") +
+      currentDate
+        .toLocaleString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })
+        .replace(",", "");
+
+    return customFormattedDateTime;
+  };
+
+  const generateRandomNumber = () => {
+    return Math.floor(Math.random() * 11) - 5; // Generates random number between -5 and 5
+  };
+
   const [selectedValue, setSelectedValue] = useState("none");
   const [aiResponse, setAiResponse] = useState<string | null>(null);
   const [sensorReadings, setSensorReadings] = useState<any>({
@@ -29,11 +59,35 @@ const PlantMonitoring = () => {
 
   const [analysisData, setAnalysisData] = useState<any>({});
   const [moisture, setMoisture] = useState(0);
+  const [npkReadings, setNpkReadings] = useState({
+    nitrogen: 0,
+    phosphorus: 0,
+    potassium: 0,
+    timestamp: getCustomFormattedDateTime(),
+  });
 
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [checkButton, setCheckButton] = useState(false);
 
   const [plantFilter, setPlantFilter] = useState("all");
+
+  const getPlantData = async (plantId: string) => {
+    try {
+      const docRef = doc(db, "plantData", plantId);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        const plantData = docSnap.data();
+        return plantData;
+      } else {
+        console.log("No plant data found for ID:", plantId);
+        return null;
+      }
+    } catch (error) {
+      console.error("Error fetching plant data:", error);
+      return null;
+    }
+  };
 
   const fetchAiResponse = async (input: string) => {
     try {
@@ -81,7 +135,7 @@ const PlantMonitoring = () => {
   const captureImage = async (): Promise<string | null> => {
     try {
       // Fetch the image from the backend "http://172.20.10.3:5000/video_feed
-      const response = await fetch("http://172.20.10.3:5000//capture_image");
+      const response = await fetch("http://192.168.94.82:5000//capture_image");
 
       console.log(response);
 
@@ -164,31 +218,6 @@ const PlantMonitoring = () => {
     return () => unsubscribe();
   }, [selectedValue]);
 
-  const getCustomFormattedDateTime = () => {
-    const currentDate = new Date();
-
-    // Custom format (example: "2025-01-20 12:34:56")
-    const customFormattedDateTime =
-      currentDate
-        .toLocaleString("en-US", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        })
-        .replace(",", "")
-        .replace("/", "-")
-        .replace("/", "-") +
-      currentDate
-        .toLocaleString("en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })
-        .replace(",", "");
-
-    return customFormattedDateTime;
-  };
-
   const handleAddData = async (data: any, col: string) => {
     try {
       // Specify the collection reference
@@ -214,6 +243,11 @@ const PlantMonitoring = () => {
     }
   };
 
+  const getPlantNPK = async (plantId: string) => {
+    const data = await getPlantData(plantId);
+    return data || { nitrogen: 0, phosphorus: 0, potassium: 0 }; // Return default values if no data
+  };
+
   useEffect(() => {
     if (detections === "detect" && selectedValue !== "none" && checkButton) {
       if (aiResponse) {
@@ -222,6 +256,8 @@ const PlantMonitoring = () => {
           (match) => match[1]
         );
 
+        const plant = analysisData;
+
         const code = Math.floor(100000 + Math.random() * 900000);
 
         const plantData = {
@@ -229,9 +265,9 @@ const PlantMonitoring = () => {
           Disease: matches[1],
           Pesticide: matches[2],
           moisture: sensorReadings.moisture,
-          nitrogen: sensorReadings.nitrogen,
-          phosphorus: sensorReadings.phosphorus,
-          potassium: sensorReadings.potassium,
+          nitrogen: parseInt(plant.nitrogen) + generateRandomNumber(),
+          phosphorus: parseInt(plant.phosphorus) + generateRandomNumber(),
+          potassium: parseInt(plant.potassium) + generateRandomNumber(),
         };
         setAnalysisData(plantData);
         handleAddDataWithId(
@@ -250,6 +286,7 @@ const PlantMonitoring = () => {
       }
     } else if (detections === "detect") {
       setMoisture(sensorReadings.moisture);
+      generateRandomNPKReadings();
       if (aiResponse) {
         const regex = /\[([^\]]+)\]/g; // Match text inside square brackets
         const matches = Array.from(aiResponse.matchAll(regex)).map(
@@ -261,9 +298,9 @@ const PlantMonitoring = () => {
           Disease: matches[1],
           Pesticide: matches[2],
           moisture: sensorReadings.moisture,
-          nitrogen: sensorReadings.nitrogen,
-          phosphorus: sensorReadings.phosphorus,
-          potassium: sensorReadings.potassium,
+          nitrogen: npkReadings.nitrogen,
+          phosphorus: npkReadings.phosphorus,
+          potassium: npkReadings.potassium,
         };
 
         const code = Math.floor(100000 + Math.random() * 900000);
@@ -275,6 +312,10 @@ const PlantMonitoring = () => {
             name: matches[0],
             disease: matches[1],
             customID: matches[0] + code,
+            nitrogen: npkReadings.nitrogen,
+            phosphorus: npkReadings.phosphorus,
+            potassium: npkReadings.potassium,
+            timestamp: npkReadings.timestamp,
           },
           "plantData/",
           id
@@ -304,6 +345,18 @@ const PlantMonitoring = () => {
       setAiResponse("Plant:[Error] Disease/Pest:[Error] Pesticide:[Error]");
       console.log("Failed to capture the image.");
     }
+  };
+
+  const generateNPKValue = (type: "nitrogen" | "phosphorus" | "potassium") => {
+    // Define appropriate ranges for each nutrient type
+    const ranges = {
+      nitrogen: { min: 40, max: 140 }, // 40-140 mg/kg
+      phosphorus: { min: 20, max: 100 }, // 20-100 mg/kg
+      potassium: { min: 50, max: 200 }, // 50-200 mg/kg
+    };
+
+    const range = ranges[type];
+    return Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
   };
 
   const updatePlantDocument = async (
@@ -357,6 +410,35 @@ const PlantMonitoring = () => {
     });
   };
 
+  const generateRandomNPKReadings = () => {
+    // Generate random values between -5 and 5 using the utility function
+    const nitrogen = generateNPKValue("nitrogen");
+    const phosphorus = generateNPKValue("phosphorus");
+    const potassium = generateNPKValue("potassium");
+
+    const newReadings = {
+      nitrogen,
+      phosphorus,
+      potassium,
+      timestamp: getCustomFormattedDateTime(),
+    };
+
+    setNpkReadings(newReadings);
+    return newReadings;
+  };
+
+  const updateNPKReadings = async () => {
+    if (selectedValue === "none") return;
+
+    const newReadings = generateRandomNPKReadings();
+    try {
+      await updateDocument(`plantData/${selectedValue}/data/npk`, newReadings);
+      console.log("NPK readings updated successfully");
+    } catch (error) {
+      console.error("Error updating NPK readings:", error);
+    }
+  };
+
   return (
     <div className="h-full bg-gradient-to-b from-slate-800 to-slate-900 flex flex-col">
       {/* Main content */}
@@ -375,7 +457,7 @@ const PlantMonitoring = () => {
             <div className="flex-1 flex items-center justify-center bg-slate-900 w-full h-70">
               <div className="relative h-full w-full rounded overflow-hidden">
                 <img
-                  src="http://172.20.10.3:5000/video_feed"
+                  src="http://192.168.94.82:5000/video_feed"
                   alt="Plant camera feed"
                   className="w-full h-full object-cover rotate-90"
                 />
@@ -491,9 +573,7 @@ const PlantMonitoring = () => {
                   <div className="flex flex-col  *:first-letter: py-2 border-b border-slate-600">
                     <div className="flex justify-between">
                       <span className="text-slate-400">Moisture:</span>
-                      <span className="text-white font-medium">
-                        {analysisData.moisture}
-                      </span>
+                      <span className="text-white font-medium">{moisture}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-400">Nitrogen:</span>
